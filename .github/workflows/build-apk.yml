@@ -1,0 +1,136 @@
+name: Build Android Auto APK
+on: [push, workflow_dispatch]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Initialize Android Project
+        run: |
+          # Create project directory structure
+          mkdir -p app/src/main/java/com/example/autobrowser
+          mkdir -p app/src/main/res/xml
+
+          # Create local.properties
+          echo "sdk.dir=/usr/local/lib/android/sdk" > local.properties
+
+          # Create settings.gradle.kts
+          echo 'pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }' > settings.gradle.kts
+          echo 'dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }' >> settings.gradle.kts
+          echo 'rootProject.name = "AutoBrowser"' >> settings.gradle.kts
+          echo 'include(":app")' >> settings.gradle.kts
+
+          # Create root build.gradle.kts
+          echo 'plugins { id("com.android.application") version "8.2.0" apply false; id("org.jetbrains.kotlin.android") version "1.9.20" apply false }' > build.gradle.kts
+
+          # Create app build.gradle.kts
+          echo 'plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }' > app/build.gradle.kts
+          echo 'android { compileSdk = 34; namespace = "com.example.autobrowser"; defaultConfig { applicationId = "com.example.autobrowser"; minSdk = 26; targetSdk = 34; versionCode = 1; versionName = "1.0" }; buildTypes { release { isMinifyEnabled = false } } }' >> app/build.gradle.kts
+          echo 'dependencies { implementation("androidx.core:core-ktx:1.12.0"); implementation("androidx.appcompat:appcompat:1.6.1"); implementation("androidx.car.app:app:1.4.0-rc01") }' >> app/build.gradle.kts
+
+      - name: Write Source Code Files
+        run: |
+          # 1. Manifest
+          cat << 'EOF' > app/src/main/AndroidManifest.xml
+          <manifest xmlns:android="http://schemas.getandroid.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <application android:label="Auto Browser" android:theme="@style/Theme.AppCompat.Light.NoActionBar">
+                  <activity android:name=".MainActivity" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+                  <service android:name=".BrowserCarService" android:exported="true" android:label="Auto Browser">
+                      <intent-filter>
+                          <action android:name="androidx.car.app.CarAppService" />
+                          <category android:name="androidx.car.app.category.IOT" />
+                      </intent-filter>
+                  </service>
+                  <meta-data android:name="com.google.android.actions" android:resource="@xml/automotive_app_desc" />
+              </application>
+          </manifest>
+          EOF
+
+          # 2. Dummy MainActivity
+          cat << 'EOF' > app/src/main/java/com/example/autobrowser/MainActivity.kt
+          package com.example.autobrowser
+          import android.os.Bundle
+          import androidx.appcompat.app.AppCompatActivity
+          class MainActivity : AppCompatActivity() {
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState: Bundle?)
+              }
+          }
+          EOF
+
+          # 3. Automotive XML
+          cat << 'EOF' > app/src/main/res/xml/automotive_app_desc.xml
+          <automotiveApp>
+              <uses name="iot" />
+          </automotiveApp>
+          EOF
+
+          # 4. BrowserCarService
+          cat << 'EOF' > app/src/main/java/com/example/autobrowser/BrowserCarService.kt
+          package com.example.autobrowser
+          import android.content.Intent
+          import androidx.car.app.CarAppService
+          import androidx.car.app.Session
+          import androidx.car.app.validation.HostValidator
+          class BrowserCarService : CarAppService() {
+              override fun createHostValidator(): HostValidator = HostValidator.ALLOW_ALL_HOSTS_VALIDATOR
+              override fun onCreateSession(): Session = object : Session() {
+                  override fun onCreateScreen(intent: Intent): androidx.car.app.Screen = BrowserScreen(carContext)
+              }
+          }
+          EOF
+
+          # 5. BrowserScreen
+          cat << 'EOF' > app/src/main/java/com/example/autobrowser/BrowserScreen.kt
+          package com.example.autobrowser
+          import android.annotation.SuppressLint
+          import android.webkit.WebView
+          import android.webkit.WebViewClient
+          import androidx.car.app.CarContext
+          import androidx.car.app.Screen
+          import androidx.car.app.model.*
+          class BrowserScreen(carContext: CarContext) : Screen(carContext) {
+              private val webView = WebView(carContext.applicationContext)
+              init { setupWebView() }
+              @SuppressLint("SetJavaScriptEnabled")
+              private fun setupWebView() {
+                  webView.settings.javaScriptEnabled = true
+                  webView.settings.userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                  webView.webViewClient = object : WebViewClient() {
+                      override fun onPageFinished(view: WebView?, url: String?) { invalidate() }
+                  }
+                  webView.loadUrl("https://search.brave.com")
+              }
+              override fun onGetTemplate(): Template {
+                  val row = Row.Builder().setTitle(webView.title ?: "Loading...").addText(webView.url ?: "Connecting...").build()
+                  return ListTemplate.Builder().setSingleList(ItemList.Builder().addItem(row).build()).setHeaderAction(Action.APP_ICON).setTitle("Brave Web Viewer").build()
+              }
+          }
+          EOF
+
+      - name: Build Debug APK
+        run: |
+          gradle wrapper --gradle-version 8.2
+          ./gradlew assembleDebug
+
+      - name: Upload Finished APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AutoBrowser-Debug-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
+          
