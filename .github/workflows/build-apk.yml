@@ -14,22 +14,21 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: Initialize Android Project and Wrapper
+      - name: Initialize Android Project
         run: |
-          # 1. Force establish the local system directories
           mkdir -p app/src/main/java/com/example/autobrowser
           mkdir -p app/src/main/res/xml
 
-          # 2. Set up SDK paths
           echo "sdk.dir=/usr/local/lib/android/sdk" > local.properties
 
-          # 3. Write Core Dependency Managers
+          # Write dependency managers config
           echo 'pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }' > settings.gradle.kts
           echo 'dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }' >> settings.gradle.kts
           echo 'rootProject.name = "AutoBrowser"' >> settings.gradle.kts
           echo 'include(":app")' >> settings.gradle.kts
 
-          echo 'plugins { id("com.android.application") version "8.2.0" apply false; id("org.jetbrains.kotlin.android") version "1.9.20" apply false }' > build.gradle.kts
+          # Use specific stable plugin tags matching default system environments
+          echo 'plugins { id("com.android.application") version "8.2.2" apply false; id("org.jetbrains.kotlin.android") version "1.9.22" apply false }' > build.gradle.kts
 
           echo 'plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }' > app/build.gradle.kts
           echo 'android { compileSdk = 34; namespace = "com.example.autobrowser"; defaultConfig { applicationId = "com.example.autobrowser"; minSdk = 26; targetSdk = 34; versionCode = 1; versionName = "1.0" }; buildTypes { release { isMinifyEnabled = false } } }' >> app/build.gradle.kts
@@ -37,7 +36,7 @@ jobs:
 
       - name: Write Source Code Files
         run: |
-          # Manifest
+          # 1. Manifest
           cat << 'EOF' > app/src/main/AndroidManifest.xml
           <manifest xmlns:android="http://schemas.getandroid.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
@@ -59,7 +58,7 @@ jobs:
           </manifest>
           EOF
 
-          # MainActivity
+          # 2. Dummy MainActivity
           cat << 'EOF' > app/src/main/java/com/example/autobrowser/MainActivity.kt
           package com.example.autobrowser
           import android.os.Bundle
@@ -71,14 +70,14 @@ jobs:
           }
           EOF
 
-          # Automotive XML
+          # 3. Automotive XML
           cat << 'EOF' > app/src/main/res/xml/automotive_app_desc.xml
           <automotiveApp>
               <uses name="iot" />
           </automotiveApp>
           EOF
 
-          # BrowserCarService
+          # 4. BrowserCarService
           cat << 'EOF' > app/src/main/java/com/example/autobrowser/BrowserCarService.kt
           package com.example.autobrowser
           import android.content.Intent
@@ -93,7 +92,7 @@ jobs:
           }
           EOF
 
-          # BrowserScreen
+          # 5. BrowserScreen
           cat << 'EOF' > app/src/main/java/com/example/autobrowser/BrowserScreen.kt
           package com.example.autobrowser
           import android.annotation.SuppressLint
@@ -121,16 +120,15 @@ jobs:
           }
           EOF
 
-      # This setups up Gradle AND correctly seeds the operational './gradlew' files inside our workspace
-      - name: Setup Gradle 8.5 Environment
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: '8.5'
-          generate-job-summary: false
+      # Bypass GitHub's network download errors by generating a completely local runtime wrapper
+      - name: Generate Local Standalone Wrapper
+        run: |
+          gradle wrapper --gradle-version 8.5
+          chmod +x gradlew
 
-      # Now the engine can successfully locate and execute the compilation step
+      # Execute directly from the generated offline executable wrapper
       - name: Build Debug APK
-        run: ./gradlew assembleDebug
+        run: ./gradlew assembleDebug --no-daemon
 
       - name: Upload Finished APK
         uses: actions/upload-artifact@v4
